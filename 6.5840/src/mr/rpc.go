@@ -22,6 +22,34 @@ type ExampleReply struct {
 	Y int
 }
 
+type TaskArgs struct {
+	WorkerId int
+}
+
+type TaskReply struct {
+	Task *Task
+}
+
+type RegistArgs struct {
+	
+}
+
+type RegistReply struct {
+	WorkerId int
+}
+
+type ReportArgs struct {
+	Phase 		TaskPhase
+	WorkerId 	int
+	Seq 		int
+	Done 		bool
+}
+
+type ReportReply struct {
+	
+}
+
+
 // Add your RPC definitions here.
 
 
@@ -30,7 +58,7 @@ type ExampleReply struct {
 // Can't use the current directory since
 // Athena AFS doesn't support UNIX-domain sockets.
 func coordinatorSock() string {
-	s := "/var/tmp/5840-mr-"
+	s := "/var/tmp/824-mr-"
 	s += strconv.Itoa(os.Getuid())
 	return s
 }
