@@ -18,13 +18,13 @@ package raft
 //
 
 import (
-	//	"bytes"
+	"bytes"
 	"sync"
 	"sync/atomic"
 	"time"
 	"math/rand"
 	"fmt"
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 )
 
@@ -127,6 +127,21 @@ func (rf *Raft) GetState() (int, bool) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 //
+
+//获取持久化的数据
+func (rf *Raft) getPersistData() []byte {
+    w := new(bytes.Buffer)
+    e := labgob.NewEncoder(w)
+    e.Encode(rf.currentTerm)
+    e.Encode(rf.votedFor)
+    e.Encode(rf.commitIndex)
+    e.Encode(rf.lastSnapshotTerm)
+    e.Encode(rf.lastSnapshotIndex)
+    e.Encode(rf.logs)
+    data := w.Bytes()
+    return data
+}
+
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
@@ -136,6 +151,8 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+	data := rf.getPersistData()
+    rf.persister.SaveRaftState(data)
 }
 
 
@@ -159,6 +176,29 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+    d := labgob.NewDecoder(r)
+
+    var (
+        currentTerm			int
+        votedFor			int
+        logs				[]LogEntry
+        commitIndex			int
+		lastSnapshotTerm	int
+		lastSnapshotIndex	int
+    )
+
+    if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&commitIndex) != nil ||
+    d.Decode(&lastSnapshotIndex) != nil || d.Decode(&lastSnapshotTerm) != nil || d.Decode(&logs) != nil {
+        //log.Fatal("rf read persist err!")
+    } else {
+        rf.currentTerm = currentTerm
+        rf.votedFor = votedFor
+        rf.commitIndex = commitIndex
+        rf.lastSnapshotIndex = lastSnapshotIndex
+        rf.lastSnapshotTerm = lastSnapshotTerm
+        rf.logs = logs
+    }
 }
 
 
@@ -234,6 +274,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	lastLogTerm, lastLogIndex := rf.getLastLogTermAndIndex()
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 
@@ -259,7 +301,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.changeStatus(Status_Follower)
 		rf.votedFor = -1
 		reply.Term = rf.currentTerm
+		rf.persist()
 	}
+
+	if lastLogTerm > args.LastLogTerm || (lastLogTerm == args.LastLogTerm && lastLogIndex > args.LastLogIndex) {
+        return
+    }
 
 	//todo logs
 
@@ -267,6 +314,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.VoteGranted = true
 	rf.changeStatus(Status_Follower)
 	rf.resetElectionTimer()
+	rf.persist()
 	fmt.Printf("[	    func-RequestVote-rf(%+v)		] : rf.voted: %v\n", rf.me, rf.votedFor)
 
 
@@ -433,6 +481,7 @@ func (rf *Raft) AppendEntriesToPeer(peerId int) {
 		rf.votedFor = -1
 		rf.currentTerm = reply.Term
 		rf.resetElectionTimer()
+		rf.persist()
 		rf.mu.Unlock()
 		return
 	}
@@ -655,6 +704,7 @@ func (rf *Raft) leaderElection() {
 		LastLogIndex:	lastLogIndex,
 		LastLogTerm:	lastLogTerm,
 	}
+	rf.persist()
 	rf.mu.Unlock()
 
 	peerNum := len(rf.peers)
@@ -676,6 +726,7 @@ func (rf *Raft) leaderElection() {
 					rf.votedFor = -1
 					rf.changeStatus(Status_Follower)
 					rf.resetElectionTimer()
+					rf.persist()
 				}
 				rf.mu.Unlock()
 			}
@@ -694,11 +745,11 @@ func (rf *Raft) leaderElection() {
 			if rf.role == Status_Candidate && rf.currentTerm == args.Term {
 				rf.changeStatus(Status_Leader)
 				//todo log
-				rf.resetElectionTimer()
 			}
 			if rf.role == Status_Leader {
-
+				rf.resetAppendEntriesTimersZero()
 			}
+			rf.persist()
 			rf.mu.Unlock()
 		} else if curNum == peerNum || curNum - grantedNum > peerNum {
 			return
